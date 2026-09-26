@@ -1,0 +1,7 @@
+
+# wrangler state must never land in this PUBLIC repo (account ids scrub-listed)
+.wrangler/
+
+# macOS Finder droppings
+.DS_Store
+docs/superpowers/

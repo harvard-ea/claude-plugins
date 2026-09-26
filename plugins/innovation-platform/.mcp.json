@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "inno-platform-spark": {
+      "type": "http",
+      "url": "https://inno-platform.spark.huit.harvard.edu/mcp"
+    }
+  }
+}

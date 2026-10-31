@@ -2,7 +2,7 @@
   "mcpServers": {
     "inno-platform-spark": {
       "type": "http",
-      "url": "https://inno-platform.spark.huit.harvard.edu/mcp"
+      "url": "${user_config.platform_url}"
     }
   }
 }

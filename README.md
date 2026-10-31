@@ -7,6 +7,13 @@ Plugins for the HUIT Spark Innovation Platform (`inno-platform.spark.huit.harvar
 /plugin install innovation-platform@harvard-ea
 ```
 
+Or from a terminal, with the platform address set:
+
+```
+claude plugin marketplace add harvard-ea/claude-plugins
+claude plugin install innovation-platform@harvard-ea --config platform_url=https://inno-platform.spark.huit.harvard.edu/mcp
+```
+
 | Plugin | Purpose |
 | --- | --- |
 | [`innovation-platform`](plugins/innovation-platform) | Build and ship apps on the HUIT Spark Innovation Platform. |

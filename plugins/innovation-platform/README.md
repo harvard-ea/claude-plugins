@@ -4,10 +4,10 @@ Claude Code plugin for your organization's Innovation Platform. It works with
 any instance: every instance-specific value (hostnames, group names, the
 template repo, the CI workflow, the Connections callback) is read from the
 platform's `get_platform_status` tool, never written into a skill. Bundles the
-`inno-platform` MCP server and nine skills: eight walk Claude through the
-whole app lifecycle (create or migrate existing code, write, containerize,
-connect to a per-user backend, gate-check, ship, and manage), and one serves
-the platform's admins. Apps deploy as
+`inno-platform` MCP server and ten skills: one serves the platform's admins,
+and the rest walk Claude through the whole app lifecycle (create, migrate
+existing code or convert a Claude artifact, write, containerize, connect to a
+per-user backend, gate-check, ship, and manage). Apps deploy as
 one of four **types**, all behind the platform's front door, which signs
 people in and decides who reaches each app: a **container** (any stack, a
 Dockerfile, and the type `register_app` defaults to when none is given), a
@@ -29,8 +29,10 @@ the template for creating the repo); you commit that file on the repo's DEFAULT
 branch and install the App on the repo; the second call, with the same
 arguments, verifies both, finishes, and returns your `deploy.yml`. Installing
 the App proves the platform can see the repo; the committed file proves you can
-change it, and registration refuses with `repo_control_unproven` until it is
-there. There is no platform-owned repo: the repo is yours (any account, public
+change it, and from platform v0.18.28 the second call answers that the
+registration is not verified yet until both are in place (before v0.18.28 it
+refused with `repo_control_unproven` while the App could see the repo and the
+file was missing). There is no platform-owned repo: the repo is yours (any account, public
 or private), and uninstalling the App unlinks and stops the app.
 
 ## HUIT Spark
@@ -66,8 +68,8 @@ claude plugin install innovation-platform@<marketplace> --config platform_url=ht
 `get_platform_status`, ending in `/mcp`). The plugin works with any instance:
 the address is the only setting.
 
-The first tool call against the `inno-platform` MCP server (e.g. from the
-`inno-new-app` skill's `register_app`) opens a browser window to **sign in
+The first tool call against the `inno-platform` MCP server (every skill's
+first is `get_platform_status`, in its Version gate) opens a browser window to **sign in
 through your organization's identity provider**.
 This is expected: the MCP server authenticates you as yourself, so every
 action it takes (creating an app, granting access, stopping or starting one)
@@ -133,324 +135,9 @@ status's `instance` block was the first such change. Reconnect (in Claude
 Code, `/mcp`, then Reconnect) or start a new session, then run the skill
 again.
 
-Platform v0.17.0 made another: its status no longer carries a sign-out
-address or gateway capabilities, and the admin tool that promoted the
-gateway went with it, so reconnect after that upgrade too. Plugin 3.0.0
-follows v0.17.0 and contract 34, where the platform signs people in to
-browser apps itself and every app's sign-out link is `/_auth/signout`; the
-platform asks for at least 3.0.0 when the instance's admins raise
-`plugin.min_version`, as the v0.17.0 release asks.
-
-Plugin 4.0.0 follows platform v0.17.2 and contract 35, which give every app
-two properties: its **audience** (who may reach it: members-only, internal,
-which is everyone who signs in and was called open before, or public, anyone
-on the internet with no sign-in), changed at any time and widened only
-through the plugin's review and a recorded guardrails acceptance; and its
-**identity** (identity-aware or anonymous, whether the app is told who calls),
-chosen at registration and fixed. Only an anonymous app can be public. Three
-tools take new input (`set_app_access` takes `audience` and
-`accept_guardrails` in place of `open`, `register_app` takes `identity`,
-`transfer_app` takes `also` and `accept_guardrails`), and `app_status` and
-`get_platform_status` answer in a new shape, so reconnect after that upgrade
-too. Every skill learned the two properties: the identity question and the
-two-app pattern for a public site at design time, the widening review and
-the narrowing note, the contract's new R10 for anonymous apps with its
-cookie rule, the uploaded-file rule, the front door's refusal, on a
-members-only or internal app, of any request from another page that is not
-a top-level GET navigation (so apps never
-frame, include or call each other from the browser, and a data link is the
-path between apps), the review of an app for every audience it can take,
-and, for admins, allowing public apps, narrowing one in an emergency and
-moving a linked pair together. The platform asks for at least
-4.0.0 once the instance's admins raise `plugin.min_version`, as the v0.17.2
-release asks.
-
-Plugin 4.1.0 follows platform v0.17.3 and contract 36. No tool takes new
-input, but `get_platform_status` no longer reports a membership authority,
-so reconnect after that upgrade too. The skills follow what the release
-changed: a purge takes a stopped app only, so an admin's fast takedown of a
-public app is a stop, then a purge; a function app that still holds a
-revoked data link's binding counts for `grant_access`, which refuses
-`link_containment` until it is redeployed, and for `revoke_access`, which
-rebuilds it; a locked backend credential has its own `connection_locked`
-notice and email setting, and `connection_expired` means removed again;
-app names may end in `-app`; the refusal codes renamed or added
-(`link_containment` on `link_app_data`, `encryption_key_missing` and
-`encryption_key_invalid`, `invalid_connection_name` and
-`invalid_connection_definition`, `purge_app`'s `app_not_stopped` and
-`r2_budget_exhausted`, `rebuild_app`'s `dispatch_in_flight`); numeric
-settings refused outside their range; the retired `## Worker contract`
-heading no longer passing the `CLAUDE.md` check; and the dependency gate
-refusing a function app's `app/package.json` with no lockfile. The release
-also corrected guidance that did harm when followed: the Dockerfile recipes
-put comments after instructions, which breaks the build, so every comment
-now sits on a line of its own; caching a backend credential is
-`get_app_security` §8's rule, keyed so one person's credential never serves
-another; and `inno-ship` gained rows for a superseded deploy
-(`deployment_not_completable`, which must not be re-run blindly) and for
-the deploy refusals it lacked. The platform asks for at least 4.1.0 once
-the instance's admins raise `plugin.min_version`, as the v0.17.3 release
-asks.
-
-Plugin 4.1.1 follows platform v0.17.4, still contract 36. No tool takes new
-input. A container app's release run now fails at its `container` job when
-the upload that records the scanned image fails (`SBOM upload failed`, with
-the platform's answer), and the platform refuses the deploy of a run that
-recorded no image (`image_not_recorded`) before it mints or starts
-anything; `inno-ship`'s rows tell an image too large for the platform from
-an outage, and say where a stopped, mismatched or unlinked app's release
-now fails. The first start of an app after a vulnerability finding uses no
-self-service start, a start holds off the safety sweep for a while, and
-`start_app`'s answer gives the time by which the fix must ship;
-`inno-manage-app` relays it. A forced `transfer_app` rebuilds
-function-shaped consumers only, since a container-shaped consumer's host
-refuses the revoked link live. The v0.17.4 release does not raise the
-floor: 4.1.0's rows misdiagnose a rare failure without breaking a build.
-
-Plugin 4.2.0 follows platform v0.17.5 and contract 37. No tool takes new
-input, but `app_status` and `get_platform_status` answer in a new shape, so
-reconnect after that upgrade too. From this version the Version gate says
-so itself. When its `get_platform_status` call fails with a validation or
-schema error, it tells the user to reconnect the platform's server and
-start the skill again (in Claude Code, `/mcp`, then Reconnect, or a new
-session).
-
-For members and owners, the skills follow what the release changed.
-`app_status` lists the app's members, with the address a revoke takes. It
-also names the revoked data links whose binding is still deployed, which
-`list_app_links` lists too. When `revoke_access`'s cascade stops, its
-warning names the redeploy, or an admin's `rebuild_app`, for each such
-link. A `link_rebuild_pending` notice says that the code reading the
-revoked source fails, and how to fix it. An instance whose manifest names a
-support contact serves it on the status's `Support:` line. Each skill
-that sends the user to a platform admin sends the request there, under
-the rule `inno-manage-app` holds, and the platform's own refusals,
-notices and sign-in pages name the contact too. The panel serves the
-platform's user guide at `/guide`, for anyone signed in. A registered app
-whose first deploy has not completed by the date `register_app`'s answer
-gives is deleted, after a `first_deploy_due` reminder, and its name is
-then free at once, unless another app still holds a deployed data link to
-it.
-`inno-new-app` and `inno-migrate-app` pass that date on at the hand-off,
-and say that the members named at registration are told when the app
-first deploys.
-
-For admins, `list_apps` marks each running app's health and every
-vulnerable app, and `get_platform_status` names the apps behind its
-UNHEALTHY and VULNERABLE counts. The audit reference reads the release's
-three new rows: `app_signin_denied`, `connection_connect_failed` and
-`app_first_deploy_due`.
-
-The v0.17.5 release does not raise the floor: its output changes are
-additive, and what 4.1.x lacks is guidance, not a step that breaks.
-
-Plugin 4.3.0 follows platform v0.17.6 and contract 38. No tool takes new
-input and no tool's output moved, so there is nothing to reconnect for.
-The skills follow what the release changed. `get_ci_status` names each
-failed job's failed step and the last lines of its log, fenced as
-untrusted data, so a skill can tell why a gate failed with no `gh`
-installed, where it used to send the reader to the run link; a failing
-gate now prints one titled line that says what failed and how to fix it.
-A refused repository fails the `policy` job with `Platform refused this
-app`, naming `app_mismatch` (with the app the repository is registered as
-and the line to fix) or `repo_unlinked`, instead of running every gate on a
-guessed policy, and a release tag on an unbuilt scaffold fails with
-`Nothing deployed`. A deploy whose CI run fails releases its app at once,
-so only a run that never reached its last step, or whose release warned
-`App not released`, waits for the recovery sweep, and a restart of a
-running app, or a start, checks the app's health again right after.
-The secret scan reads every commit on every branch and tag, on every run, a
-release tag's included, so a secret its default rules find anywhere in an
-app's history fails its next release: `inno-ship`'s and
-`inno-safety-preflight`'s gitleaks guidance gives the fix (rotate the
-secret, then rewrite the history or record the finding's fingerprint in
-`.gitleaksignore`, its only waiver), and never a new commit that deletes
-the file.
-
-The v0.17.6 release does not raise the floor, which stays 4.1.0: an older
-build reads a failure from the run link and waits for the sweep where it
-no longer has to, which costs time without breaking a step.
-
-Plugin 4.4.0 follows platform v0.17.7, still contract 38. No tool takes new
-input and no tool's output moved. A platform admin's MCP client now lists
-the admin-only tools and a member's does not, and a client keeps the list
-it read when it connected, so a person granted or revoked admin reconnects
-to see the right one; `inno-fleet-admin` says when, and says which tools
-are admin-only. The skills follow what else the release changed.
-`get_app_contract` serves one requirement by its id (`sections: ["R3"]`),
-so a skill that reads one requirement asks for that one alone, and
-`["2"]` still serves all ten; a platform before v0.17.7 refuses an id with
-`bad_request`, and the skills then ask for `["2"]`. A write tool's answer puts each caveat to act
-on in a `WARNING:` line of its own and each note in a `NOTE:` line, where
-`register_app` listed its caveats under `Warnings:` and `set_app_connection`
-wrote `Warning:` and `Note:` (its sign-in and token sites on different
-domains are now a `WARNING:`); the skills quote the new labels. The panel's
-over-long note, reason or description is refused `text_too_long`, which
-retires `note_too_long`. `register_app`'s second call may leave out `type`
-and `description`, the first call's being used, and `inno-new-app` and
-`inno-migrate-app` say so; `identity` still goes on both calls. The skills
-name a `container` or `function` app a browser app, and a platform that
-cannot ask the identity provider who holds an address one with no identity
-provider lookup, as the platform's own text now does.
-
-The v0.17.7 release does not raise the floor, which stays 4.1.0: 4.3.0
-quotes labels the platform no longer writes and reads a whole section where
-one requirement would do, which costs words without breaking a step.
-
-Plugin 4.5.0 follows platform v0.17.9, still contract 38. No tool takes new
-input and no tool's output moved. From v0.17.9 an app's address answers
-from registration until its purge: until its first deploy starts it shows
-a page saying the app has not been deployed yet (while that deploy runs, a
-visitor meets the app's sign-in, where it has one, and then a page saying
-the app is not available right now), and while the app is stopped a page
-saying it is stopped and its owner can start it again. The
-skills say what a visitor sees there: `inno-manage-app`'s `stop_app` and
-`start_app` (a start serves the app again within seconds), `inno-new-app`'s
-stop and its first-deploy URL, `inno-ship`'s first-deploy hand-over,
-which tells the user to reload after a minute if they see the not-deployed
-page, and its `container_rollout_failed` row, for an app none of whose
-deploys has finished. `inno-ship` still never looks the address up itself:
-the first deploy's switch from that page to the app leaves the name with no
-DNS record for a few seconds, and a lookup then can be cached as missing
-for minutes. `inno-fleet-admin` lists the admins' new `edge_mismatch`
-notice: an app's custom domain out of step with its status, which the
-hourly edge pass reports and never repairs, and the transition that brings
-it back (for a never-deployed app, its first deploy, or, for an app nobody
-will ship, `stop_app` then `purge_app`), with what each costs. Its
-audit reference reads the edge pass's three rows, `app_edge_reconciled`,
-`app_edge_mismatch` and `edges_reconciled`, and the `placeholder` key that
-`app_created`, `app_stopped`, `app_started`, `deploy_completed` and
-`app_purged` carry when they hold or release an address.
-
-4.5.0 also corrects three sentences that platform v0.17.8, which released
-no app plugin, made false. When `list_admins`' list is not simply what the
-platform's admin table held, a line of its own under the list says where it
-came from (the identity provider's admin group, or the manifest's
-`identity.initialAdmins`), and `inno-fleet-admin` no longer quotes the old
-words. A push builds and gates
-a container app's image but generates no SBOM and records no image id,
-which a release tag's run alone does; `inno-safety-preflight` and
-`inno-containerize` say so.
-
-The v0.17.9 release does not raise the floor, which stays 4.1.0: older
-skills describe a stopped app's address as detached, quote `list_admins`'
-old words and say a push builds the SBOM, none of which misleads a step a
-build depends on.
-
-Plugin 5.0.0 follows platform v0.17.11, still contract 38. Four tools take
-new input, so reconnect after that upgrade too. The two variable tools
-take lists under new names: `set_app_variables` takes
-`variables: [{ name, value, secret? }]` and sets them in one call, so a
-container app starts one new container instance for all of them, and
-`remove_app_variables` takes `names`; each refuses a call with one bad
-item whole, naming the item when the call names two or more, and stores or
-removes nothing. `mark_all_notifications_read` takes `scope`: `mine`, the
-default, marks the caller's own notices (an admin's include the admins'
-shared ones), and `platform`, a platform admin's alone, marks every notice
-on the platform. The admin-list import takes `apply` alone. The skills
-follow, and say what platform v0.17.10 changed: a start of an app that
-never completed a deploy returns it to not deployed with its first-deploy
-window started again and uses no self-service start; an answer a retry
-will not help says whom to tell; a support bundle goes to a platform
-admin; a connect page answers a backend's redirect with
-`<backend> refused the connection`; and `inno-ship` reads the `Trivy`,
-`Docker build` and `Dependency install` failure titles. The v0.17.11
-release raises the floor to 5.0.0, so the platform tells every 4.x build
-to update, and its skills stop at their Version gate until it does.
-
-Plugin 5.1.0 follows platform v0.17.12, still contract 38, with no tool's
-input or output changed, so no reconnect is needed. The
-`link_rebuild_pending` notice is now `link_revoked`, its email setting
-`notify.email.link_revoked`; notices sent before keep the old stage, which
-`inno-manage-app` says. The skills say what `host_check_failed` asks
-of an owner (a retry when the read failed, a platform admin when the token
-lacks access), that a release restarts a container only when it moves the
-host build, and point at one home for a never-deployed app's start and a
-registration's deadline. `inno-ship`'s bundle rows read the bundle's
-annotation, which now separates the code and the message with "; " as the
-token's and finalize's do, and a local `deploy-bundle` refusal starting
-"deploy-bundle failed: ". The floor stays 5.0.0.
-
-Plugin 5.1.1 is a fix within `inno-containerize`, still against platform
-v0.17.12 and contract 38, with no tool's input or output changed. The local
-sanity check in `references/local-check.md` now owns what it creates: each run
-builds its own image tag and names its containers after it, removes only those
-(after a Ctrl-C too) and never a container some other run or tool named,
-publishes the smoke container on a free loopback port instead of the host's
-8080, so another local service cannot pass the check for it, and stops with a
-`FAIL:` line when the build fails or the smoke container cannot be created or
-started, rather than checking a stale image. An app that crashes on boot still
-reports that it exited, with its logs. The non-root user check decides exactly
-as before. The floor stays 5.0.0.
-
-Plugin 5.1.2 follows platform v0.17.20 and contract 39, with no tool's input
-or output changed, so no reconnect is needed. Its fixes are wording within
-the existing workflows. `inno-add-connection` names the new
-`app_type_unsupported` refusal (an identity-aware app of any type but
-`mcp-container` takes no Connection, and one left on it can still be listed
-and removed), and the check order for the connect page's "Not available"
-counts that cause and starts with `app_status`. `inno-new-app` and
-`inno-migrate-app` say that `register_app` echoes `connections` as a
-reminder only for such an app, answering any other type that it takes none.
-A `client_auth: "basic"` pair holding characters beyond ASCII letters,
-digits and `*-._` can be refused `invalid_client`, with `"post"` the remedy,
-and a "Connecting failed" 502 that repeats points at the backend's token
-endpoint. The health re-check after a deploy, start or restart is said to
-run only when `health.probe_enabled` is on for the app.
-`inno-safety-preflight` names a crashed accessibility scanner, and the MCP
-client's "No access" page's next step, restarting the app's connection, is
-in `inno-manage-app`. The floor stays 5.0.0.
-
-Plugin 5.1.3 follows platform v0.17.21, whose Connect Claude Code card offers
-the plugin alone: this README no longer lists a bare `mcp add` among the
-card's commands. No skill or tool changed; the floor stays 5.0.0.
-
-Plugin 5.2.0 follows platform v0.17.22. When the user means a new app for
-everyone who signs in or for the public, `inno-new-app` now reads
-`access.allow_internal` or `access.allow_public` for the user during design
-(`get_config user=`) and says up front whether a platform admin has to allow
-it, instead of the user learning so at the widening review after the app is
-built. `inno-ship` gives the steps to add a shipped MCP app as a connector in
-Claude Desktop or claude.ai, and in Claude Code, and this README says how to
-add the platform itself to Desktop or claude.ai. The floor stays 5.0.0.
-
-Plugin 6.0.0 follows platform v0.17.23, still contract 39. That release
-signs people in through any OpenID Connect identity provider and keeps Okta as
-the one directory it can read accounts from. The platform no longer serves
-the admin group's marking tool (claim_instance_objects), so it lists 53
-tools, and the admin-list import is now `import_admin_group`
-(import_okta_memberships before), whose `counts.okta_failed` is
-`counts.directory_failed`; `grant_admin`'s `okta_user_not_found` is
-`directory_account_not_found`, and `list_admins`' `okta_fallback` source is
-`directory_fallback`. `get_platform_status` gains an `Identity provider:`
-line, and an `identity` object in its typed output, naming the provider by
-the instance's display name and saying whether the instance has a
-directory; with none, the line says what the platform cannot learn and
-which settings shorten it. The skills follow: `inno-fleet-admin` names
-`import_admin_group` and `directory_account_not_found`, drops the marking
-tool's section, says what an instance with no directory does at each step
-(the import refuses `directory_unavailable`, an offboarding relies on
-`revoke_sessions` and `revoke_access`, and a purge deletes nothing at the
-identity provider), and every skill names the identity provider where it
-named Okta. The v0.17.23 release raises the floor to
-6.0.0, so the platform tells every 5.x build to update, and its skills stop
-at their Version gate until it does: update and reconnect once, as at
-5.0.0.
-
-Plugin 6.0.1 follows platform v0.17.23, still contract 39. `inno-new-app`
-names every file each type's scaffold ships (a `function` repo has no
-`app/package.json` until a dependency is added) and has the agent list the
-repo's files before reading them, so reading the reference code no longer
-names a file that is not there and shows the user a "Failed" step. No tool
-changed; the floor stays 6.0.0.
-
-Plugin 6.1.0 follows platform v0.17.24, contract 40. The platform's own
-answers and its contract documents now say "directory" for the identity
-provider's account lookup, as the skills already did, so `inno-fleet-admin`
-drops the note that bridged the two words. Sign-in now follows the
-provider's discovery document for how the platform authenticates at its token
-endpoint, and a directory named without its secret shows a red dot on the
-panel's Status card. No tool changed; the floor stays 6.0.0.
+What each release changed is in [CHANGELOG.md](CHANGELOG.md), oldest first.
+An entry that names a file of the `inno-convert-artifact` starter is one to
+copy again into an app converted on an earlier release.
 
 ### House style
 
@@ -482,6 +169,11 @@ produce is a Dockerfile and app code rather than sentences a user reads.
   GitHub App -> `register_app` (second call) -> pull -> scaffold.
 - **`skills/inno-migrate-app`**: assess an existing repo (read-only), then
   register and adapt it **in place**, keeping its stack where the gates allow.
+- **`skills/inno-convert-artifact`**: turn a Claude artifact (React or HTML)
+  into a function app whose browser interface the platform's CI builds from
+  `app/ui/`, with the artifact's `window.storage` kept in the app's own
+  database, then register, preflight and ship it. Needs a platform whose
+  contract §1.1 has the Browser interface bullet.
 - **`skills/inno-platform-conventions`**: stack policy (Python/Starlette is
   the tested stack; any stack meeting the contract is fine), escaping,
   the storage client/endpoints, identity (the kinds of caller the
@@ -512,19 +204,23 @@ produce is a Dockerfile and app code rather than sentences a user reads.
 - **`skills/inno-manage-app`**: grant/revoke access, widen an app's audience
   through its review or narrow it, check status and metrics,
   stop, start, or restart an app, read its logs and notifications, set its
-  environment variables / API keys, and build support bundles
-  (`create_support_bundle`'s description gives the cap). Idle apps are
+  environment variables / API keys, build support bundles
+  (`create_support_bundle`'s description gives the cap), and keep or move an
+  app's repository after a transfer or a return from custody, which holds
+  its deploys from platform v0.18.26. Idle apps are
   warned, stopped, then purged on a config-driven clock, and real use resets
-  it. What counts as real use is served from one place, the **Lifecycle (idle
-  clock)** section of `get_platform_docs`; this skill quotes it rather than
-  keeping its own list.
+  it. What counts as real use is served from one place, `get_platform_docs`
+  section 11 (Lifecycle); this skill quotes it rather than keeping its own
+  list.
 - **`skills/inno-fleet-admin`**: for platform admins only, the actions that
   reach across the fleet: the admin roster (`list_admins`, `grant_admin`,
-  `revoke_admin`), filling an empty admin list from the identity provider's
-  admin group (`import_admin_group`, its only job),
+  `revoke_admin`), the membership mode and SCIM provisioning
+  (`get_provisioning`, `create_scim_token`, `revoke_scim_token`, and the
+  previewed switch), a deactivated owner's apps in custody,
   reassigning an app's owner, purging an app, rebuilding an app's released
   code at its live tag (`rebuild_app`), ending one person's panel and browser
-  app sessions everywhere, accepting a naming change, platform configuration,
+  app sessions everywhere (from platform v0.18.27 their MCP grants too),
+  accepting a naming change, platform configuration,
   and the fleet-wide
   reads (every app, every user, the audit log, the platform's logs and its
   backup). An owner manages their own apps with `inno-manage-app`.
@@ -533,35 +229,31 @@ produce is a Dockerfile and app code rather than sentences a user reads.
 
 Each skill loads on its own, so a few blocks are deliberately repeated rather
 than pointed at. The **Version gate** at the top of every skill is the main
-one: it is byte-identical across all nine by design, because a skill that
-loads alone cannot follow a pointer to reach its own precondition. Check that
-it has stayed identical with:
+one: it is byte-identical in every skill by design, because a skill that
+loads alone cannot follow a pointer to reach its own precondition. It is
+written into every skill from `scripts/version-gate.md` by
+`scripts/render-gates.sh`, and `bash scripts/render-gates.sh --check` (CI's
+`version-gate-parity` job) fails when a copy differs or is malformed;
+`CLAUDE.md` says how to change it.
 
-```
-for f in plugins/innovation-platform/skills/*/SKILL.md; do
-  awk '/^## Version gate/{p=1} p{print} p&&/^Carry on\.$/{exit}' "$f" | md5 -q
-done | sort -u
-```
-
-One line of output means the nine agree. That is the same block CI's
-`version-gate-parity` job compares, so this check and CI cannot disagree. Everything else that appeared in
-several skills now has one home and pointers from the rest:
-`inno-platform-conventions` owns the semgrep scope, the forbidden-path list,
-the identity header rule, the Node dependency rule, the storage caps, the
-`CLAUDE.md` header rule and what to do for each refusal the platform's
-tools share; `inno-new-app`'s
+Everything else that appeared in several skills now has one home and
+pointers from the rest: `inno-platform-conventions` owns the semgrep scope,
+the forbidden-path list, the identity header rule, the Node dependency rule,
+the storage caps, the `CLAUDE.md` header rule and what to do for each
+refusal the platform's tools share; `inno-new-app`'s
 `references/hand-authored-layout.md` owns which `CLAUDE.md` to start from;
 `inno-manage-app` owns the call budget (the CI poll cadence included),
-support bundles, the active-app-limit rule, the transfer request, where a
-request for a platform admin goes, and the
-`cross_owner_link_revoked` and `host_upload_blocked` notices;
-`inno-safety-preflight` owns the pre-push branch and symlink checks, how to
-read `get_ci_status`, and how to read the CI accessibility, response-header
-and Dockerfile reports; `inno-ship`'s `secrets` row owns the gitleaks fix
-and the fingerprint waiver; `inno-containerize` owns the health-probe clock;
-`inno-new-app` owns the name-check rules; `inno-fleet-admin` owns the
-admin-only actions (a purge's missing archive included); and this README
-owns House style.
+support bundles, the active-app-limit rule, the transfer request, the
+owner's keep or move of a held app's repository, where a
+request for a platform admin goes, and the `cross_owner_link_revoked` and
+`host_upload_blocked` notices; `inno-safety-preflight` owns the pre-push
+branch and symlink checks, how to read `get_ci_status`, and how to read the
+CI accessibility, response-header and Dockerfile reports, and its
+`references/gate-failures.md` owns each safety gate's cause and fix, the
+gitleaks fix and the fingerprint waiver among them; `inno-containerize` owns
+the health-probe clock; `inno-new-app` owns the name-check rules;
+`inno-fleet-admin` owns the admin-only actions (a purge's missing archive
+included); and this README owns House style.
 
 What the platform serves, the skills fetch rather than copy. The
 application contract comes from `get_app_contract`: with no arguments it
@@ -583,9 +275,15 @@ bypass (only the thin caller `deploy.yml` in their own repo is editable, and
 stripping it just means the reusable workflow never runs). A push to the
 default branch runs the gates and deploys nothing. Only pushing a `v*` release tag reaches
 the deploy job, and it runs the same gates first. That workflow gates the
-deploy behind config-integrity, secret scanning, SAST, dependency auditing,
-the dependency release-age cooldown, and container/image scanning, all of which
-must pass before the deploy even starts. A container deploy ships the exact
+deploy behind the nine jobs the deploy job needs, each named here by its id
+and by the name a run page shows: `policy` (shown as Gate policy),
+`config-integrity` (shown as Config integrity),
+`secrets` (shown as Secret scan (gitleaks)), `sast` (shown as SAST (semgrep)),
+`deps` (shown as Dependency audit), `dep-age` (shown as Dependency cooldown),
+`container` (shown as Container contract and image scan),
+`scaffold-check` (shown as Scaffold check) and
+`app-build` (shown as Build the app Worker), all of which must pass before the
+deploy even starts. A container deploy ships the exact
 image those gates scanned, pinned by digest, never a second build; a function
 deploy ships the exact bundle CI built in a job that holds no credential of
 any kind, and the deploy job checks it against that build's digest before it

@@ -1,6 +1,6 @@
 ---
 name: inno-containerize
-description: Use when writing or editing the Dockerfile for an app repo. Encodes the exact contract the platform's container gate requires (non-root, port 8080, patched base, CVE-clean image) for ANY stack, with reference recipes.
+description: Use when writing or editing the Dockerfile for an app repo ("write a Dockerfile for my app", "the container check failed", "make it run as non-root"). Encodes the exact contract the platform's container gate requires (non-root, port 8080, patched base, CVE-clean image) for ANY stack, with reference recipes.
 ---
 
 # inno-containerize
@@ -50,8 +50,9 @@ mcp-container app). R1, R2, R7 and R8 state exactly the rules this skill
 applies, §4.1 is the base-image policy, and the answer opens with the
 platform's current digest-pinned recommended base images.
 
-The `container` CI job builds your Dockerfile with **no deploy credentials
-present** (an app author fully controls this build's inputs, and nothing of
+The CI job `container` (shown as Container contract and image scan) builds
+your Dockerfile with **no deploy credentials present** (an app author fully
+controls this build's inputs, and nothing of
 platform value is reachable from it), then runs four checks: a Trivy image
 scan, a non-root-user assertion, an `EXPOSE 8080` assertion, and a
 **`GET /healthz` smoke test** against the built image. Every check that runs
@@ -104,15 +105,18 @@ base to the digest `get_app_contract` serves.
    and this item is the plugin's one home for the probe clocks (`inno-ship`
    points here). There are three separate clocks, and R2 states each one
    exactly:
-   - **The CI smoke gate.** The `container` job runs the built image
-     (`docker run -d -p 8080:8080`) and polls `/healthz` 18 times, 5 seconds
-     apart, with a 4 second per-try timeout: about 90 seconds if the port
-     refuses outright, up to about 162 seconds if it accepts the connection
-     and then hangs. It requires **exactly 200**, and so does the runtime
-     probe: a 204, and any 3xx, fail both, so a framework that redirects
-     `/healthz` to `/healthz/` fails both. Anything else, or no answer at
-     all, and it dumps the container logs and fails the job, which fails
-     `deploy`.
+   - **The CI smoke gate.**
+     `container` (shown as Container contract and image scan) runs the built
+     image (`docker run -d -p 8080:8080`) and polls `/healthz` 18 times, 5
+     seconds apart, with a 4 second per-try timeout: about 90 seconds if the
+     port refuses outright, up to about 162 seconds if it accepts the
+     connection and then hangs. It requires **exactly 200**, and so does the
+     runtime probe: a 204, and any 3xx, fail both, so a framework that
+     redirects `/healthz` to `/healthz/` fails both. A container that exits
+     before `/healthz` answers 200 ends the window early and fails with its
+     logs. Anything else, or no answer at
+     all, and it dumps the container logs and fails the job, so
+     `deploy` (shown as Deploy) is skipped.
    - **The runtime health probe.** It binds to the same endpoint after every
      deploy, when probes run for the app (`health.probe_enabled`, which
      `get_config app=<name>` shows): immediately on each green one, then on
@@ -128,6 +132,8 @@ base to the digest `get_app_contract` serves.
      `app_status` reading `Health: re-probe pending (not answering yet: ...)`
      is normal right after a deploy (see `inno-ship`), and a deploy that
      leaves `/healthz` failing alarms within about 70 minutes, not at once.
+     A restart or a start re-checks health the same way, but it does not
+     update the deployment record, so it never restarts those 10 minutes.
      The hourly floor applies only while a status is pending: once it
      clears, the recurring check goes back to following
      `health.probe_interval_hours`, so it is not always literally daily.
@@ -136,6 +142,8 @@ base to the digest `get_app_contract` serves.
      about 95 seconds. That span is neither the hourly re-probe nor
      `health.probe_interval_hours`. A 401, a 403 or a 302 is not retried:
      it reads as the probe being blocked, not as the app being unhealthy.
+     On the probe a deploy fires, a thrown connection error is the one
+     result not retried: it is deferred at once.
 
    Size the boot to answer inside that first 45 second attempt; a second
    attempt follows 5 seconds later, and nothing follows it. Keep it cheap and
@@ -143,15 +151,15 @@ base to the digest `get_app_contract` serves.
    that waits on storage is not. Never stub it as a TODO.
 5. **Keep build inputs where the gates allow them.** Put the app's code and
    manifests under `app/` (an `app/src/` is fine); a repo-root `src/` is
-   platform-owned and the `config-integrity` gate fails any file in it. The
-   two that bite a Dockerfile author specifically: never commit a `.npmrc`
-   anywhere, `app/.npmrc` included, even for a container build that would use
-   it, and never commit a symlink that points at a **directory**, anywhere in
-   the repo, dangling ones included, or at a file outside the repository (a
-   link to a *file* inside the repository is fine). Copy the real directory
-   or file in, or produce it during the image build. The full
-   forbidden-path list is R7; the plugin's copy, with the reason for each, is
-   `inno-platform-conventions`' **Files you must not touch** section.
+   platform-owned and `config-integrity` (shown as Config integrity) fails any
+   file in it. The two that bite a Dockerfile author specifically: never
+   commit a `.npmrc` anywhere, `app/.npmrc` included, even for a container
+   build that would use it, and never commit a symlink that points at a
+   **directory**, anywhere in the repo, dangling ones included, or at a file
+   outside the repository (a link to a *file* inside the repository is fine).
+   Copy the real directory or file in, or produce it during the image build.
+   The full forbidden-path list is R7; the plugin's copy, with the reason for
+   each, is `inno-platform-conventions`' **Files you must not touch** section.
 
 **Base image: use the digest-pinned recommended bases (python/node/go) that
 `get_app_contract` serves; never hard-code a digest from this skill,

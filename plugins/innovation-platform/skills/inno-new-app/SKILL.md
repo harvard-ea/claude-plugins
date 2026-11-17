@@ -35,18 +35,20 @@ Before anything else in this skill, do these six steps in order.
 
 Carry on.
 
+**Starting from a Claude artifact?** When what the user has is an artifact
+made in claude.ai or Claude Desktop (a React or HTML page, not a repository),
+use the `inno-convert-artifact` skill instead: it builds the artifact as a
+function app with a browser interface and keeps its saved data.
+
 Creates a new Innovation Platform app end to end: intake -> the user creates a
 repo **they own** from the platform template -> `register_app` (first call)
 -> commit the proof-of-control file it names + install the platform GitHub App
--> `register_app` (second call) provisions + binds it -> pull + scaffold. Requires the
-`inno-platform` MCP server (ships with this plugin's `.mcp.json`) to be
-connected. The first call to any `inno-platform` tool triggers a browser
-sign-in through your organization's identity provider. That's expected, not an
-error: wait for it to complete. **If the
-connector wasn't already authorized when the session started, waiting isn't
-enough**: mid-session authorization alone does not expose the tools (the MCP
-client enumerates tools at startup); the user must authorize it AND you must
-restart the session before calling any `inno-platform` tool.
+-> `register_app` (second call) provisions + binds it -> pull + scaffold.
+
+The first `inno-platform` tool call triggers a browser sign-in through your
+organization's identity provider, which is expected; a connector authorized
+only after this session started needs a session restart before its tools
+appear.
 
 **The repo is the USER's.** There is no platform-owned repo model anymore. The
 repo lives in the user's **own** account or org, created from the instance's public
@@ -74,14 +76,16 @@ product names unless they have shown technical fluency. The full rule is the
 plugin README's **House style** section, and it applies to every user-facing
 sentence in this flow.
 
-**Asking a platform admin.** Where this skill sends the user to a platform
-admin (a guardrails exception, a higher app limit, registration turned back
-on), the request goes to the contact the platform names: the `Support:` line
-of the status you read in the Version gate, when it has one.
-`inno-manage-app`'s **Asking a platform admin** is the one home for that
-rule.
+A request for a platform admin goes where `inno-manage-app`'s **Asking a
+platform admin** says.
 
-## 1. Intake: ask the user for five things
+## 1. Intake: seven questions, five of them now
+
+Ask the user these five now. The design (§1b) asks the other two, the
+identity and the audience the app is meant for in the end (one question,
+which also asks for the address the user signs in with when the app is meant
+for more than its members and you do not know it), and states everything
+else as your recommendation.
 
 1. **App name**: lowercase letters, digits, hyphens only, 3-29 chars,
    starting with a letter. This drives the app's **hostname** on the platform
@@ -199,8 +203,11 @@ way, the design still has to be written into your reply and approved (see
 "Present the design, THEN ask for approval" below); the skill's absence is not a
 reason to skip that.
 
-The design includes four contract-informed choices that are **the user's to
-make, with your recommendation**:
+The design includes four contract-informed choices. The identity is **the
+user's to answer**; the deployment type, the pattern and the stack are
+**your recommendation**, stated in the design, which the user may change.
+Only ask the user if it's genuinely ambiguous; otherwise just tell them what
+you're doing.
 
 - **Identity**: ask the user, in these words, **"does the app need to know
   who each caller is?"** Yes is `identity-aware`, the default: the platform
@@ -254,10 +261,9 @@ make, with your recommendation**:
     fixed at registration).
     **Idle clock:** an MCP app that is built and then left connected but
     unused is warned and then stopped like any idle app. What counts as use
-    is served from one place, the **Lifecycle (idle clock)** section of
-    `get_platform_docs`, and `inno-manage-app`'s lifecycle section points to
-    it: fetch and quote that sentence rather than describing the rule in your
-    own words. Tell the user when you hand the app over (`inno-manage-app`).
+    is served from one place, `get_platform_docs` section 11 (Lifecycle),
+    and `inno-manage-app`'s lifecycle section points to it: fetch and quote
+    that sentence rather than describing the rule in your own words. Tell the user when you hand the app over (`inno-manage-app`).
   - **`mcp-container`:** choose when the product is an **MCP server** that
     needs the **container** shape instead: a **non-TS/JS stack**, **native
     dependencies**, **heavy/long-running compute** a Cloudflare Worker can't
@@ -287,21 +293,25 @@ make, with your recommendation**:
   (FastMCP), but any language is equally supported.
 
 **Who may reach the app, its audience, is not a registration choice.** Every
-new app starts **members-only**: its member list (the owner and anyone
-granted access). Widening it later, to **internal** (everyone the identity
-provider signs in, members or not) or to **public** (anyone on the internet,
-with no sign-in, an anonymous app only), is `inno-manage-app`'s widening
-review, run once the app is built and checked, never at registration. Ask
-which audience the app is meant for in the end, so the design serves it
-(an anonymous app is reviewed as public from the start, `inno-safety-preflight`),
-and say plainly that it starts members-only.
+new app starts **members-only**: the people on its member list (the owner and
+anyone granted access) and the live members of its identity provider group,
+`<prefix><app>-users`, when the provider pushes one over SCIM. Widening it
+later, to **internal** (everyone the identity provider signs in, members or
+not) or to **public** (anyone on the internet, with no sign-in, an anonymous
+app only), is `inno-manage-app`'s widening review, run once the app is built
+and checked, never at registration. Ask which audience the app is meant for in
+the end, so the design serves it (an anonymous app is reviewed as public from
+the start, `inno-safety-preflight`), and say plainly that it starts
+members-only. Ask it as one question, with a conditional part when you do
+not already know the address the user signs in with: if the app is meant for
+more than its members, which address that is (the check below needs it).
 
 **When the answer is internal or public, check now whether it is allowed.**
 Whether an app may be widened is a platform setting a platform admin
 controls: `access.allow_internal` (on by default) and `access.allow_public`
 (off by default), each settable for the whole platform, for one owner, or
-for one app. Before you design further, call `get_config user=<the user's
-own sign-in address>` (ask for it if you do not know it) and read the
+for one app. Before you design further, call `get_config email=<the user's
+own sign-in address>` (the audience question above asks for it) and read the
 target's line, `access.allow_public = <value> [<where it came from>]` (or
 `access.allow_internal`):
 
@@ -365,7 +375,7 @@ The written design covers, at minimum:
 Only after that design is in your reply: **stop and get explicit user
 approval** (of the design *and* the name) before §2. Ask the approval question
 in your own words referencing the design the user can now read; put genuinely
-separate decisions (name choice, identity, deployment type, members) in their own
+separate decisions (name choice, identity, members) in their own
 questions rather than folding them into the approval. Registration provisions
 real resources (a database, file storage and the app's member list) and
 binds them to the user's repo; the type and the identity are fixed at
@@ -381,8 +391,8 @@ account* it lands in, not *who runs the command*.
 
 **Preferred: do it for them with `gh`.** Run `gh auth status`; an authenticated
 account with `repo` scope is the user's **own** credential, so a repo it creates
-lands in their ownership exactly as the browser path does. Confirm the name and
-visibility with them, then:
+lands in their ownership exactly as the browser path does. Tell them the repo
+name and the visibility you will use, then:
 
 ```sh
 gh repo create {owner}/{repo} --template <template repo> --private
@@ -391,9 +401,10 @@ gh repo create {owner}/{repo} --template <template repo> --private
 Here `<template repo>` is the owner/name on the `Template repo:` line of the
 status you read in the Version gate.
 
-- Suggest the app name itself; public or private is fine. Ask which they want, or run
-  `gh repo list --limit 5 --json name,isPrivate` and match what their recent repos use, rather than
-  assuming.
+- Suggest the app name itself; public or private is fine. Match what their
+  recent repos use (`gh repo list --limit 5 --json name,isPrivate`) and say
+  which you chose, rather than assuming; ask only when that is genuinely
+  ambiguous.
 - Template copying is **asynchronous**: an immediate `git clone` can land an
   empty repo. Poll `git fetch` until `origin/main` exists before checking out.
 
@@ -442,16 +453,23 @@ register_app({ app, repo, description, type, identity, members, accept_guardrail
   and `description` out: the first call's are used (`register_app`'s
   description says so), and a call 2 that names another keeps the first
   call's, saying so on a `WARNING:` line for the type and a `NOTE:` line
-  for the description (a description call 1 left out takes call 2's). A
-  repeated call 1 changes either only while the platform still answers it
-  as call 1 (`Registration started`, with the install link), which is only
-  until the platform GitHub App covers the repo: from then on a repeat
-  checks the proof file (`repo_control_unproven`, changing nothing, while
-  it is missing) and, once it finds it, runs as call 2 and creates the app
-  with the first call's type, fixed for good. So settle the type
-  before call 1 when the App already covers the repo, and otherwise before
-  the user installs it (`get_platform_docs`' **What the tools do in
-  detail**, its Registration item, has the rule).
+  for the description (a description call 1 left out takes call 2's). From
+  platform v0.18.28 a repeated call changes either until the platform
+  verifies the registration (the App on the repo and the proof file both in
+  place): until then every repeat answers call 1's instructions again,
+  under `... is not verified yet.` once the platform has checked, and takes
+  the type and description it names; once it verifies, it runs as call 2
+  and creates the app with the type the registration holds, fixed for
+  good. So settle the type before the App and the proof file are both in
+  place. On an earlier platform a repeat changes either only while the
+  platform still answers it as call 1 (`Registration started`, with the
+  install link), which is only until the platform GitHub App covers the
+  repo: from then on a repeat checks the proof file
+  (`repo_control_unproven`, changing nothing, while it is missing), so
+  there settle the type before call 1 when the App already covers the
+  repo, and otherwise before the user installs it. `get_platform_docs`
+  section 16 (What the tools do in detail), its Registration item, has the
+  rule.
 - `identity`: from the design's identity question (§1b): `"anonymous"`
   when the app must not know who each caller is; omit it, or pass
   `"identity-aware"`, otherwise. The app's identity is set by the call
@@ -467,11 +485,13 @@ register_app({ app, repo, description, type, identity, members, accept_guardrail
   shared with them (in-platform plus email per their own notification
   settings) when the app's first deploy completes, once its address answers,
   not at registration; call 2's answer says so. Name only people who should
-  hear about it when it goes live. An address the identity provider does
-  not know is still added but not notified, and call 2's answer names it on a
+  hear about it when it goes live. Where the platform checks addresses (in
+  scim mode, against the accounts the identity provider pushed; in jit mode
+  nothing is checked), an address with no account is still added but not
+  notified, and call 2's answer names it on a
   `WARNING:` line of its own. Check its spelling with the user, and if it
   is mistyped, remove it with `revoke_access` (`inno-manage-app`). An address the
-  platform could not check with the identity provider is added too, with its
+  platform could not check is added too, with its
   own warning. Each
   added address is pinned to an account as `grant_access` pins it
   (`inno-manage-app`), and the owner's own row to the account that registers
@@ -498,7 +518,7 @@ register_app({ app, repo, description, type, identity, members, accept_guardrail
   `set_app_connection`. An anonymous app takes none: a call with
   `identity: "anonymous"` and any `connections` is refused.
 
-The first call returns text beginning **`Registration started for "{name}" ←
+The first call returns text beginning **`Registration started for "{name}" <-
 {repo}.`** It carries, in this order: (a) the template link again, in case the
 repo doesn't exist yet; (b) a **proof-of-control file**: a `path:` under
 `.inno-platform/` and the exact `contents:` (a 64-character hex string), with a
@@ -545,9 +565,18 @@ nothing to prune.
    call 2 verifies access directly.
 2. Save the configuration. GitHub redirects them to the platform's verification
    page, which says **Repository verified** once the App can reach the repo AND
-   the proof file matches. If it says **Proof file not found**, the file is
-   missing, on the wrong branch, or has the wrong contents: fix it, then reopen
-   the link or simply run call 2 (it re-checks without the redirect). If it
+   the proof file matches. If it says **Not verified yet** (from platform
+   v0.18.28), one of the two is wanting, and the page cannot say which: the
+   App installed on the account that owns the repo with access to the repo
+   itself, or the proof file on the default branch with the exact contents.
+   Check both, fix what is wanting, then reopen the link or simply run call 2
+   (it re-checks without the redirect). On an earlier platform the page
+   names the cause: **Proof file not found** (the file is missing, on the
+   wrong branch, or has the wrong contents), or a page saying the App is not
+   installed on the repository or its installation does not cover it. If it
+   says **Too many requests** (from platform v0.18.28), the link was opened
+   too often in the last minute, or too many requests came from the user's
+   network in it: wait a minute, then open it again. If it
    says **GitHub App installed** instead (GitHub's configure flow, for an
    account that already had the App), that page carries no registration: just
    run call 2.
@@ -577,7 +606,10 @@ provisions the app, and binds the repo. It returns text beginning
   app that is not pinned: a pinned app's answer has none, and neither has a
   repeat of a registration already provisioned (nor its members sentence).
   Then read the deadline from `app_status`'s `Lifecycle:` line, which says
-  plainly when an app is pinned.
+  plainly when an app is pinned. From platform v0.18.26 such a repeat by
+  the app's owner, for an app whose deploys an ownership move held, is the
+  keep: it lifts the hold, and a NOTE leading the answer says so
+  (`inno-manage-app`'s **Held deploys: keep or move the repository**).
 - `URL (after first deploy): https://<app host>`: **quote
   this from the response, never construct it** (the host and domain are
   the instance's). For an **mcp-function** or **mcp-container** app the
@@ -598,7 +630,8 @@ provisions the app, and binds the repo. It returns text beginning
   every case. This is a real step, not a hands-off one. Keep the
   `workflow_dispatch` trigger (the platform re-dispatches it for security
   respins). The snippet has no `secrets:` line, and the file must not gain one:
-  `secrets: inherit` is a blocking finding for the `sast` gate, and the
+  `secrets: inherit` is a blocking finding for
+  `sast` (shown as SAST (semgrep)), and the
   platform workflow needs no caller secrets.
 
 ### Reading register_app's responses: branch, don't assume
@@ -606,28 +639,52 @@ provisions the app, and binds the repo. It returns text beginning
 `register_app`'s description states what each refusal means. What to do next:
 
 - **`Registration started …`** on call 1: commit the proof file, hand over the
-  install link, and wait (above). The same text on call 2 means the platform
+  install link, and wait (above). The same text on call 2 means the 24-hour
+  registration expired, or, on a platform before v0.18.28, that the platform
   still cannot see the repo through the App (not installed yet, installed
-  without access to this repo, or a transient GitHub failure), or the 24-hour
-  registration expired. Compare the proof `path:` with the one you committed:
-  if it changed, commit the new file. Then have the user install the App on the
-  repo (or widen its repository access) and call again.
+  without access to this repo, or a transient GitHub failure). Compare the
+  proof `path:` with the one you committed: if it changed, commit the new
+  file. Then have the user install the App on the repo (or widen its
+  repository access) and call again.
+- **`Registration for "{name}" <- {repo} is not verified yet.`** on call 2
+  (from platform v0.18.28): the platform checked and could not verify the
+  registration, and answers the same whatever is wanting, so check both:
+  the App installed on the account that owns the repo with access to the
+  repo itself (not installed, installed without access to this repo, or a
+  transient GitHub failure), and the proof file on the default branch with
+  the exact contents. The paragraph after that first line names both, and
+  the rest is call 1's instructions again, with the same proof file and
+  install link: fix what is wanting, then call again.
 - **`App "{name}" registered …`**: call 2 succeeded; proceed to §4.
+- **`Repository move started for "{name}" <- {repo}.`** on call 1, or
+  **`Moved "{name}" to {repo} …`** on call 2 (from platform v0.18.26): the
+  name is an existing app the user owns whose deploys an ownership move
+  held, and naming another repository moves that app there; no new app is
+  made. Stop and confirm with the user that moving that app is what they
+  meant (if not, pick another name), then follow `inno-manage-app`'s
+  **Held deploys: keep or move the repository**. A NOTE or answer saying
+  the app's deploys `stay held` is that section's too.
 - **`guardrails_not_accepted`**: do the §1a review, then pass
   `accept_guardrails: true`.
 - **`invalid_name` / reserved**: pick another name (you should have caught
   this with `check_name`).
 - **`name_unavailable`**: an app with that name already exists and is not the
-  caller's own partial registration; pick another name.
+  caller's own partial registration; pick another name. (From platform
+  v0.18.26 the owner of an app whose deploys are held, naming another
+  repository, starts that app's move instead: the bullet above.)
 - **`app_anonymous`**: the call named `identity: "anonymous"` and some
   `connections`. An anonymous app has no Connections, since it is never told
   who its caller is. Drop `connections`, or, if the app really must reach a
   backend as each person, go back to the design: that app is identity-aware.
 - **`invalid_repo`**: pass an `owner/repo` slug, not a URL or a bare name.
 - **`repo_control_unproven`**: the error text repeats the exact path and
-  contents: commit that file (call 1 above) and call again. It can come back
-  at call 2 even after the setup page said verified, because call 2 re-checks
-  the file right before provisioning, so never delete it early.
+  contents: commit that file (call 1 above) and call again. From platform
+  v0.18.28 it comes only at call 2 after the registration was verified (the
+  setup page said verified, or an earlier call 2 found both in place),
+  because call 2 re-checks the file right before provisioning, so never
+  delete it early; before proof the platform answers `... is not verified
+  yet.` instead. On an earlier platform it also comes while the App can
+  reach the repo and the file is missing or wrong.
 - **`name_quarantined`**: the name is held after a purge until the UTC time
   the message names, and past it while a `function` or `mcp-function` app
   that read the purged app's data has not been rebuilt or redeployed since
@@ -673,7 +730,8 @@ provisions the app, and binds the repo. It returns text beginning
   limit; never propose which to stop).
 - **`repo_already_registered`**: that GitHub repo is already bound to an app
   (one repo binds to at most one app). Use a different repo, or manage the
-  existing app via `inno-manage-app`. (`repo_id_conflict` is the audit action
+  existing app via `inno-manage-app`. A held app's move answers it too,
+  for a repository another app holds. (`repo_id_conflict` is the audit action
   the platform records for this refusal; callers never see it as an error code.)
 - **`repo_owner_claimed`**: the message names who holds that GitHub account:
   ask them or a platform admin to register on the user's behalf, or use a
@@ -715,7 +773,7 @@ provisions the app, and binds the repo. It returns text beginning
     not bound to the app): lay the type's files out from a current copy of
     the template repo (`references/hand-authored-layout.md`), and delete
     `scaffold/` before deploying, since the leftover fails the first
-    deploy's `config-integrity` gate.
+    deploy's `config-integrity` (shown as Config integrity).
   - **`scaffold not applied`** (a warning): the platform could not write
     the prune commit, so the repo is as it was. Lay the type's files out
     the same way (a template copy already holds them under
@@ -765,8 +823,8 @@ a stateless FastMCP starter for `app/main.py`, plus its own `README.md`,
 the container reference's. The platform owns a fixed set of other paths (a
 repo-root `src/`, the root build files, any wrangler config, and the rest
 contract R7 lists: `get_app_contract` with `sections: ["R7"]`), and none of
-them may be in the repo: don't create any. `get_platform_docs`'
-**Environment & config integrity** section lists them too; the plugin's
+them may be in the repo: don't create any. `get_platform_docs` section 10
+(Environment & config integrity) lists them too; the plugin's
 copy, with what to do when a migrated repo already carries one, is
 `inno-platform-conventions`' **Files you must not touch** section. Load
 that skill before writing any application code (stack policy, storage,
@@ -827,13 +885,8 @@ you read in §1b (§1.1 to §1.3) are the authority for each type's deltas.
   route** returning **exactly 200** (a 204 or a redirect to `/healthz/` fails
   both the CI smoke gate and the runtime probe), and reach storage through
   the app's **own bindings** `env.DATA` (D1) and `env.FILES` (R2), not
-  `storage.internal`. Declare every npm package the code imports in a
-  **non-root** `app/package.json`, and commit the `app/package-lock.json`
-  that `npm install` (run inside `app/`) produces, kept in sync with
-  `package.json`. The install rule and everything it refuses have one home,
-  `inno-platform-conventions`' **Node apps** paragraph; the short of it is
-  that a runtime import must sit under `dependencies`, because CI installs
-  `--omit=dev`. Never interpolate user data into hand-built HTML: even
+  `storage.internal`. Declare dependencies and commit the lockfile as
+  `inno-platform-conventions`' **Node apps** paragraph says. Never interpolate user data into hand-built HTML: even
   escaped, the SAST gate blocks it; return dynamic data as JSON (like the
   scaffold's `/me`) or use an auto-escaping template library. Do NOT create
   `wrangler.jsonc`/`app-worker.jsonc`: those are platform-injected. The
@@ -958,7 +1011,11 @@ answer (`Deploy it by <date> <time> UTC`), never worked out from memory: an
 app whose first deploy has not completed by then is deleted (its repository
 is never touched), a reminder (`first_deploy_due`) comes the number of days before it
 that the answer gives, and its name is then free again at once, unless
-another app still holds a deployed data link to it. When the answer gives
+another app still holds a deployed data link to it. From platform v0.18.27
+that reminder comes no sooner than a day after the registration (or a
+later start of the app), so where the platform's reminder lead is at least
+as long as the whole window the deadline moves out by a day; the answer's date
+already counts that day, so quote it as given. When the answer gives
 no date (a pinned app, or a repeat of a registration already provisioned),
 read the deadline from `app_status`'s `Lifecycle:` line; only that line
 says an app is pinned. When the registration named

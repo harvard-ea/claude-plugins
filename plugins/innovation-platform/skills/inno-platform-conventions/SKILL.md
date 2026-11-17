@@ -1,6 +1,6 @@
 ---
 name: inno-platform-conventions
-description: "Use when writing or reviewing code inside an app repo's app/ directory: stack policy, storage, identity, and the files CI will reject if touched. Load this before writing any application code for an Innovation Platform app."
+description: Use when writing or reviewing code inside an app repo's app/ directory ("add a page to my app", "save this per person", "review my app's code"), for the stack policy, storage, identity, and the files CI will reject if touched. Load this before writing any application code for an Innovation Platform app.
 ---
 
 # inno-platform-conventions
@@ -96,7 +96,12 @@ answers one:
   then retry: a deploy whose CI run fails releases the app at once, so the
   refusal normally clears as the run ends, green or red. If it does not
   clear, `inno-manage-app`'s **A deploy whose CI run died** says what holds
-  the app and how to release it.
+  the app and how to release it. From platform v0.18.26 only `restart_app`,
+  `set_app_variables` and `remove_app_variables` answer it: `stop_app` ends
+  the deploy in flight and stops the app, and `purge_app` answers a
+  deploying app `app_not_stopped`. The message then adds that a stop ends
+  the deploy; never stop an app only to clear this refusal unless the user
+  wants that release ended and the app offline.
 - `github_app_not_configured`, `github_app_key_invalid` or
   `installation_token_failed`: a fault on the platform's side in reaching
   the app's repository through the platform GitHub App, which only a
@@ -160,9 +165,10 @@ apps alike (`inno-migrate-app` keeps the original stack by default): don't
 Whatever the stack, pin dependencies in its own manifest under `app/`
 (`requirements.txt` for the Python reference, where the template's copy is
 the source for its pins; `package.json` for Node; `go.mod` for Go) and keep
-them CVE-clean: the `deps` and `container` gates fail the build otherwise.
-R8 says what each gate audits, and §4 names the known FastAPI trap: check
-that the lockfile resolves a clean Starlette before committing to it.
+them CVE-clean: `deps` (shown as Dependency audit) and
+`container` (shown as Container contract and image scan) fail the build
+otherwise. R8 says what each gate audits, and §4 names the known FastAPI trap:
+check that the lockfile resolves a clean Starlette before committing to it.
 
 **Node apps: commit `app/package-lock.json`, and declare every import.**
 §1.1's **Dependencies** bullet and R8 are the rule; this is how to follow it:
@@ -190,18 +196,18 @@ that the lockfile resolves a clean Starlette before committing to it.
 - Regenerate the lockfile with `npm install` inside `app/` whenever you
   change dependencies, and commit both files together. A function-shaped app
   (`function`, `mcp-function`) that ships `app/package.json` must commit
-  `app/package-lock.json`: the `app-build` job fails, naming the file, when
-  it is missing or out of step. That job installs and bundles the app on
-  **every push to the default branch**, so the preflight catches a missing
-  lockfile, an import that does not resolve, a devDependency used at
-  runtime, a symlink out of the repository and a bundle over 16 MiB before
-  you tag. The `deps` gate refuses a function-shaped app's `app/package.json`
-  with no committed lockfile as well.
+  `app/package-lock.json`: `app-build` (shown as Build the app Worker) fails,
+  naming the file, when it is missing or out of step. That job installs and
+  bundles the app on **every push to the default branch**, so the preflight
+  catches a missing lockfile, an import that does not resolve, a devDependency
+  used at runtime, a symlink out of the repository and a bundle over 16 MiB
+  before you tag. `deps` (shown as Dependency audit) refuses a function-shaped
+  app's `app/package.json` with no committed lockfile as well.
 - A container app should commit it too: while an admin has the release-age
   cooldown on (`safety.min_release_age_days` above 0), an app shipping
   `app/package.json` with no committed, parseable `app/package-lock.json`
-  fails the `dep-age` gate, because ranges have no single publish date to
-  check.
+  fails `dep-age` (shown as Dependency cooldown), because ranges have no
+  single publish date to check.
 - The cooldown dates a function-shaped app's `dependencies` alone, since
   its build never installs `devDependencies`, and a container app's
   `devDependencies` too, since its Dockerfile may install them.
@@ -215,13 +221,14 @@ concatenation**. The current user's identity (`X-Forwarded-User`) is
 attacker-influenced input (anyone who can reach the front door with a valid
 sign-in controls their own email string, and it flows straight into your
 pages), so unescaped interpolation is a stored or reflected XSS that the
-`sast` job's semgrep OWASP scan and human review both reject. That scan
-covers the whole repository except the platform-owned root `src/` and the
-directories semgrep skips by default at any depth (`test/`, `tests/`,
-`build/`, `dist/`, `vendor/` and `node_modules/`), so your Dockerfile,
-`.github/workflows/deploy.yml` and any root-level script are scanned too;
-R8 is the authoritative scope. Use your stack's auto-escaping template
-engine. In the Python reference, `Jinja2Templates(directory="templates")`
+semgrep OWASP scan of `sast` (shown as SAST (semgrep)) and human review both
+reject. That scan covers the whole repository except the platform-owned root
+`src/` and the directories semgrep skips by default at any depth (`test/`,
+`tests/`, `build/`, `dist/`, `vendor/` and `node_modules/`), so your
+Dockerfile, `.github/workflows/deploy.yml` and any root-level script are
+scanned too; R8 is the authoritative scope. Use your stack's auto-escaping
+template engine. In the Python reference,
+`Jinja2Templates(directory="templates")`
 autoescapes by default: route all dynamic content through
 `templates.TemplateResponse(request, "page.html", {...})`.
 
@@ -434,12 +441,14 @@ that template has no such helper either, read an empty or missing
   rows once, since every identified request carries both headers: a
   migration in the app's own code, recommended and not required (§3).
 - **`X-Forwarded-Groups`** carries at most one group, this app's own
-  members group, and only when the caller is a member; every other request,
+  members group, and only when the caller is a member (on the member list or
+  in the app's identity provider group alike: a group member is a member);
+  every other request,
   a signed-in non-member of an internal app included, carries no group (R3's
   group rule). The group's name is in the `App groups:` line of the status
   you read in the Version gate, with the app's name in place of `{app}`. It
-  never carries the platform admin group, another app's groups, or any
-  other group, so use it only to tell a member from a signed-in non-member
+  never carries another app's groups or any other group the caller belongs
+  to, so use it only to tell a member from a signed-in non-member
   (the helper's `member` is that test); any finer role (an editor, a staff
   view, an in-app admin) needs your own role store keyed on
   `X-Forwarded-Subject`, and only for a caller who has one.
@@ -456,7 +465,9 @@ that template has no such helper either, read an empty or missing
   sends their MCP client back to authorize.
 - **How fast a change reaches the header** is R3's to state: within the
   front door's cache, at most 60 seconds on an MCP app and 10 seconds on a
-  browser app.
+  browser app; a change to the app's identity provider group counts from
+  when the provider's push reaches the platform, not from the edit at the
+  provider.
 - **The platform signs people in, outside your code.** On a members-only or
   internal browser app the front door sends a person with no session through
   the platform's own
@@ -470,8 +481,7 @@ that template has no such helper either, read an empty or missing
   no session, shows a "Sign in" page whose link opens the app's root
   address in the whole window (another page's frame of the app is refused:
   **No browser calls or frames between apps**, below). What people see
-  is the platform docs' **Signing in and out: what people see**
-  (`get_platform_docs`).
+  is `get_platform_docs` section 5 (Signing in and out).
 
 The front door also sets three proxy headers you may trust:
 `X-Forwarded-Host` (the hostname the request arrived on; build links from
@@ -489,7 +499,20 @@ app host shares one parent domain, it also drops any `Set-Cookie` that
 carries a `Domain` attribute, even one naming the app's own host, and
 strips a `Clear-Site-Data` header. So keep your cookies host-only (no
 `Domain`), route nothing under `/_auth/`, and never rely on
-`Clear-Site-Data`.
+`Clear-Site-Data`. From platform v0.18.29 the platform itself clears what a
+browser stores for the app's address: when a person opens the address while
+the app is stopped or not deployed yet, and, on an app people sign in to,
+once at each browser's first sign-in (a browser's first after the
+platform's upgrade to v0.18.29 included, and again after its person clears
+cookies). From platform v0.18.31 that clear is the browser's storage alone
+(local and session storage, IndexedDB, Cache Storage and service workers),
+never its HTTP cache or its cookies, since a browser can hold the page for
+seconds while it clears the app's entries from its HTTP cache, at a cost
+that grows with the whole cache; so a response your app served with a long
+cache lifetime can still be answered from the browser's cache until it
+expires. What a browser keeps for the app's
+host is outside the platform's guarantees (R5): keep nothing there the app
+cannot rebuild, and put what must last in the app's own storage.
 
 **Every cookie your app sets** carries the `__Host-` prefix (so `Secure`,
 `Path=/` and no `Domain`) and is `HttpOnly` unless the app's own script
@@ -524,21 +547,11 @@ session: it never identifies anyone.
 
 ### An anonymous app: R10
 
-The contract's rule for an app registered `anonymous`, R10
-(`get_app_contract` with `sections: ["R10"]`, the authoritative text), opens:
-
-> **R10: An anonymous app keeps nothing per person**
->
-> An app registered with
-> `identity: "anonymous"` is never told who its caller is, at any audience
-> (R3): the four identity headers arrive present and empty on every request,
-> and no `X-Caller-Assertion` arrives, so it has no Connections (§2.2). Only an
-> anonymous app can be public. No accounts, no per-person views, no keys or
-> limits taken from a person. What a visitor submits is stored and never
-> rendered. Per-visitor state (a cart, a multi-step form, a vote already cast)
-> lives in the app's own cookie or under a random cookie key, is never an
-> identity, and follows APP-SECURITY's forged-request rules. The app may be
-> public.
+The contract's rule for an app registered `anonymous` is R10
+(`get_app_contract` with `sections: ["R10"]`, the authoritative text: read it
+before writing such an app's code). Its gist: the app is never told who
+calls, at any audience, so it keeps nothing per person and has no
+Connections.
 
 So the app reads none of the identity headers, keys nothing on them, and
 shows no sign-out link (it never shows who is signed in, so R4 asks for
@@ -549,8 +562,8 @@ none). R10 goes on to every app's cookies (above), where the promise ends
 - **Per-visitor state** takes the cookie rule above (`__Host-`, `HttpOnly`
   unless the app's own script reads it), and a state change is accepted
   only from the app's own pages (`get_app_security` §12).
-- **Submissions** are stored and never rendered by this app; whatever reads
-  them (an identity-aware editor, the two-app pattern's) protects them in
+- **Submissions** stay out of this app's own pages, as R10 says; whatever
+  reads them (an identity-aware editor, the two-app pattern's) protects them in
   its own code, and serves any uploaded file as **Files someone uploaded**
   (under **Rendering**) says.
 - **Where the promise ends** (R10). While the app is members-only or
@@ -630,7 +643,9 @@ than wiring this ad hoc. The rules the code must hold are §2.2 and
   `ConnectionLocked` (a subclass of `NotConnected`, so catch it first), tell
   them to **re-authorize this MCP client** (in Claude: `/mcp`, then
   re-authenticate that server), never to reconnect the backend, which
-  loops.
+  loops. On a `ConnectionsError` whose code is `connections_upstream_refused`,
+  tell them the backend refused the app's connection settings and that its
+  owner has been told, and do not retry.
 
 ## Sign out: one link, no session code
 
@@ -653,8 +668,8 @@ every app and every instance, so there is nothing to look up, and `/_auth/`
 is the platform's on every app host (R3): route nothing under it yourself.
 An app made before platform v0.17.0 links to the old sign-out address and
 changes that link once (the contract's version 34 note, `get_app_contract` with
-`history: true`). What people see when they sign in and out is the platform
-docs' **Signing in and out: what people see** (`get_platform_docs`).
+`history: true`). What people see when they sign in and out is
+`get_platform_docs` section 5 (Signing in and out).
 
 ## Logging: stdout, one event per line
 
@@ -670,11 +685,10 @@ issues guidance) is actually useful later instead of a wall of noise.
 
 There is nothing for you to configure here. The platform sets `ENVIRONMENT`
 to `production` itself, with every other binding, when it uploads a function
-app's Worker, and a container app's host is the platform's own (R7, and
-`get_platform_docs`'
-**Environment & config integrity**). No wrangler config may live in your
-repo (below), and `ENVIRONMENT` is a reserved Variable name that
-`set_app_variables` refuses. For local dev, pass mock identity headers
+app's Worker, and a container app's host is the platform's own, as R7 and
+`get_platform_docs` section 10 (Environment & config integrity) say. No
+wrangler config may live in your repo (below), and `ENVIRONMENT` is a
+reserved Variable name that `set_app_variables` refuses. For local dev, pass mock identity headers
 straight to the locally run container, and try each kind of caller R3
 names; never add an "auth disabled in dev" code path. An anonymous app
 tries the last one alone, since every request it gets looks like that:
@@ -694,10 +708,10 @@ The platform installs its own build tools when CI builds your app, from its
 CI mirror, into a directory of its own outside your checkout, and supplies a
 function app's bundling config, so **none of the following may exist in your
 repo at all**. R7 is the authoritative list,
-with the reason for each; the `config-integrity` gate fails outright,
-naming each path it finds ("delete `<file>`: the platform injects ...").
-Never create or restore one locally, even to "match the template": there is
-no version of these files that belongs in your repo.
+with the reason for each; `config-integrity` (shown as Config integrity) fails
+outright, naming each path it finds ("delete `<file>`: the platform injects
+..."). Never create or restore one locally, even to "match the template":
+there is no version of these files that belongs in your repo.
 
 - `src/`, all of it, at the repo root. The platform owns that directory, so
   the gate fails a repo with anything of yours under it (a source file,
@@ -750,7 +764,10 @@ no version of these files that belongs in your repo.
   build refuses a link that points outside the repository, or nowhere,
   anywhere in the checkout, `node_modules` directories included (the gate
   does not walk them), where an installed package or a `file:` dependency
-  can put one: a link may name only a file inside your repository.
+  can put one: a link may name only a file inside your repository. From
+  platform v0.18.31 a container app's `container` (shown as Container
+  contract and image scan) runs the same check over its checkout before it
+  builds the image, on every push as well as on a tag.
 
 Keep secrets and local env out of the repo entirely: an app-level key or
 config value belongs in a **Variable** (`set_app_variables`, or the app

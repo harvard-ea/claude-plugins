@@ -21,8 +21,9 @@ rewrites the connection with `client_auth: "post"`).
   identity; a connection left on an app that cannot fetch one is removed
   with `remove_app_connection`), then `list_connections` for the app (does
   that connection name exist, and is it enabled), then whether the person
-  may use the app. On a members-only app that means its member list
-  (`grant_access` if they are not on it); an internal app admits everyone
+  may use the app. On a members-only app that means its member list or
+  its identity provider group (`grant_access` if they are in neither); an
+  internal app admits everyone
   who signs in, so there the cause is one of the others. The same page also
   answers when the platform could not check the person's access just then
   (its identity provider or its database did not answer), so one more try a
@@ -64,21 +65,30 @@ rewrites the connection with `client_auth: "post"`).
 - **"Too many requests"** (HTTP 429, `Retry-After: 60`). The connect pages
   share a budget of 60 requests a minute per person with the platform
   panel's live reads. Wait a minute, then start again from the chat.
-- **"Account inactive"** (HTTP 401). The person's account at the identity
-  provider is suspended or deprovisioned. Nothing about the connection can fix
+- **"Sign-in refused"** (HTTP 403). The platform's account check refuses
+  the person: in scim mode their pushed account is inactive or deleted, or
+  was never pushed. Nothing about the connection can fix
   that.
-- **"Your encryption key isn't reachable from here"**. The person's stored
+- **"Your encryption key is not reachable from here"**. The person's stored
   connections are sealed to them personally, and this browser session
   cannot unlock them. The page gives two ways out: use the app once from
   the chat (or the device where they last connected) and retry the link
   within the minutes it names, which loses nothing; or **Start fresh**,
-  which removes every backend connection stored under their address, so
-  they reconnect each one. Let them choose. When the page is reached on the
+  which removes every backend connection stored for the account they are
+  signed in as (from platform v0.18.4; never another account's at the same
+  address), so they reconnect each one. Let them choose. When the page is reached on the
   way back from a backend's sign-in, it offers no **Start fresh**, only a
   link to sign in and retry the connection.
 
 **The connect flow itself:**
 
+- **"Start this connection again"** (a 400; `secret_form` and
+  `oauth2_client_creds` meet it most). The connect form lasts 10 minutes and
+  is bound to the browser and account that opened it, so the page appears
+  when the form expired, or was opened in another browser or account.
+  Nothing the person entered was saved. Follow the page's Start again link
+  (or the chat's connect link) and paste the token or client pair within the
+  10 minutes.
 - **"Finish in the browser you started in"** (`oauth2_code` only). The
   backend login was completed in a different browser, or a different browser
   profile, from the one that opened the connect link. Open the connect link
@@ -92,7 +102,7 @@ rewrites the connection with `client_auth: "post"`).
 - **"Link already used"** (`oauth2_code` only). The backend sent the person
   back with a link that was already used or has expired. Start again from
   the chat.
-- **"Invalid connection link"** (`oauth2_code` only). The address the
+- **"Connection link not valid"** (`oauth2_code` only). The address the
   backend sent the person back to is malformed. Start again from the chat;
   if it repeats, check the connection's sign-in settings against the
   backend's documentation.

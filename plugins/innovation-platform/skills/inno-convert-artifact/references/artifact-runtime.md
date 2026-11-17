@@ -1,0 +1,81 @@
+# What an artifact gets on claude.ai, and what it becomes here
+
+An artifact runs in a sandboxed frame on claude.ai, which provides a few
+things the artifact's code never declares. Each one needs a home in the app.
+
+| On claude.ai | In the converted app |
+|---|---|
+| React compiled in the browser, libraries provided | `app/ui/`, built by the platform's CI (contract §1.1, Browser interface); each library a pinned entry under `dependencies` in `app/package.json` (`libraries.md`) |
+| Tailwind utility classes, always available | `app/ui/styles.css` holding `@import "tailwindcss";`, built by CI's pinned Tailwind CLI over `app/ui/` |
+| `window.storage`, personal | `app/ui/storage-shim.ts` and `app/storage.ts`: one D1 table, each key scoped to the signed-in person's `X-Forwarded-Subject` |
+| `window.storage`, shared (`true` as the last argument) | the same table with no owner: one copy for everyone who reaches the app |
+| `window.claude.complete(prompt)` | not supported in this version: removed, and listed in the plan |
+| A share link anyone with the link can open | the platform's front door: members-only at first, widened through `inno-manage-app` |
+| No response headers | the starter's Content-Security-Policy, `nosniff`, `Referrer-Policy`, and `private, no-store` on the page and the API |
+| `localStorage`, `sessionStorage` | unchanged: they work, per browser, until the platform clears them (from platform v0.18.29, when a person opens the app while it is stopped or not deployed yet, and at each browser's first sign-in to it); `window.storage` for anything that should last or follow the person |
+
+## window.storage
+
+The shim keeps the shape artifacts use. Anthropic's public documentation
+does not list these methods; the shape below is the one in common use and
+observed behavior, so test any edge an artifact relies on.
+
+```js
+await window.storage.set(key, value, shared?)   // { key, value, shared }
+await window.storage.get(key, shared?)          // { key, value, shared }, or null when the key is not there
+await window.storage.delete(key, shared?)       // { key, deleted, shared }
+await window.storage.list(prefix?, shared?)     // { keys, prefix, shared }
+```
+
+- `shared` is `true` for shared storage; anything else means personal.
+- Values are strings, as on claude.ai: artifacts store JSON with
+  `JSON.stringify` and read it back with `JSON.parse`. The shim turns a
+  non-string into a string with `String(value)`.
+- Unverified edges: on claude.ai a `get` of a missing key may throw rather
+  than return `null`. The shim returns `null`; an artifact that catches the
+  throw still works, one that tests for `null` works too.
+- Limits (in `app/storage.ts`): keys up to 200 characters, values up to
+  1,900,000 bytes of UTF-8 (a character outside ASCII takes two to four
+  bytes; the database refuses more than 2,000,000 in a row), 1,000 keys per
+  person (and 1,000 shared), `list` returns at most 1,000 keys, and its
+  prefix is at most 200 characters (a longer one is refused, not ignored).
+  A request carries at most 4,000,000 bytes: twice the value limit, since
+  JSON writes each quote or backslash in a value as two bytes, so a value at
+  its limit fits however many it holds (stored JSON holds many). Only a value
+  full of raw control characters, which JSON writes as six bytes each, can
+  still be refused as `body_too_large`. A call over a limit throws, with the
+  reason in the error's message. Raise a limit only with a reason: they bound what one
+  person can store, and the value limit must stay under the database's.
+- When the database fails, a call throws with `storage_unavailable` in its
+  message, and the next call tries again.
+- A call that fails throws a `RequestError` (`app/ui/storage-shim.ts`) whose
+  `kind` is `signed_out` (the session has ended: loading the page signs in
+  again), `refused`, `unavailable`, `timeout` (no answer within 30 seconds)
+  or `network`, and whose `message` is a sentence a person can read. A `set`
+  or `delete` whose answer was lost has `outcomeUnknown` set, since it may
+  have been stored: read before writing again. The shim never sends a call
+  again by itself, and an ended session shows in the app bar too. The
+  starter's placeholder `Artifact.tsx` shows the states a page can offer
+  around a call.
+- Every call needs a signed-in person, shared ones included, since the app
+  is identity-aware. Data saved on claude.ai does not move over.
+
+## Shared data is visible to everyone who reaches the app
+
+On claude.ai, shared storage is visible to everyone the artifact is shared
+with. Here it is visible to everyone who reaches the app: its members at
+first, everyone who signs in once it is widened to internal. Say so in the
+plan when the artifact writes anything personal to shared storage.
+
+## What the page may load
+
+The starter's policy is `default-src 'self'` with `script-src 'self'`,
+`style-src 'self'`, `img-src 'self' data:`, `font-src 'self' data:` and
+`connect-src 'self'`. So:
+
+- every script comes from the built bundle (no CDN `<script>` tags);
+- images and fonts come from the bundle (CI inlines imported ones as data
+  URLs) or from the app itself;
+- `fetch` reaches only the app's own routes;
+- a library that injects a `<style>` element at run time is blocked; style
+  attributes set by React work.

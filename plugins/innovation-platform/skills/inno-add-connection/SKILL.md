@@ -1,6 +1,6 @@
 ---
 name: inno-add-connection
-description: Use when an app needs to reach an external backend AS EACH INDIVIDUAL USER (a per-user API or SaaS account the app fronts, such as a departmental system, a niche tool or a dev instance) rather than with one shared app key. Discovers how people sign in to that backend, provisions a Connection with set_app_connection (a pasted token, the backend's own login, or a per-user client ID/secret pair), and wires the app to consume it. Identity-aware mcp-container apps only in v1.
+description: Use when an app needs to reach an external backend AS EACH INDIVIDUAL USER (a per-user API or SaaS account the app fronts, such as a departmental system, a niche tool or a dev instance) rather than with one shared app key ("connect my app to <backend> as each user", "use each person's own account"). Discovers how people sign in to that backend, provisions a Connection with set_app_connection (a pasted token, the backend's own login, or a per-user client ID/secret pair), and wires the app to consume it. Identity-aware mcp-container apps only in v1.
 ---
 
 # inno-add-connection
@@ -44,9 +44,10 @@ accounts. This skill walks through recognizing when that's what you need,
 figuring out how the backend signs people in, setting the Connection up, and
 wiring the app's code to use it.
 
-Requires the `inno-platform` MCP server (ships with this plugin's `.mcp.json`).
-If this is the first call against it this session, expect a browser sign-in
-through your organization's identity provider; that's expected, not an error.
+The first `inno-platform` tool call triggers a browser sign-in through your
+organization's identity provider, which is expected; a connector authorized
+only after this session started needs a session restart before its tools
+appear.
 
 **Read the contract's Connections section before you start:** call
 `get_app_contract` with `sections: ["2.2"]`. §2.2 is the
@@ -71,13 +72,10 @@ paste in." Never "OAuth," "PKCE" or "client secret." Those words are fine in
 your own reasoning and in the tool calls you make, just not in the sentences
 you say back to a non-technical user.
 
-**Asking a platform admin.** Where this skill sends the user to a platform
-admin (the platform's encryption key, or its own Connections setup), the
-request goes to the contact the platform names: the `Support:` line of the
-status you read in the Version gate, when it has one. `inno-manage-app`'s
-**Asking a platform admin** is the one home for that rule. A request to
-the backend's own administrators (for a registered client, say) is not
-one of these.
+A request for a platform admin goes where `inno-manage-app`'s **Asking a
+platform admin** says.
+A request to the backend's own administrators (for a registered client, say)
+is not such a request.
 
 **No catalog, no steering.** This skill doesn't maintain or suggest a list of
 backends. If the target is a big enterprise service that already has its own
@@ -293,14 +291,28 @@ must correct one later, tell the user that everyone connected will have to
 reconnect, and expect the tool's response to report how many credentials it
 invalidated. Re-supplying an unchanged config is free.
 
+From platform v0.18.30 one exception: a connection stored before that
+release with an endpoint not written in the form below refuses every edit
+that resends its stored config (`set_app_connection`, with or without
+`disabled`, and the panel's Edit), until the owner rewrites that endpoint in
+the form the refusal names. That rewrite counts as an endpoint move: every
+user's stored credential and saved consent is deleted (each is emailed to
+reconnect), and the client secret is cleared unless `client_secret` is sent
+in the same call, so present it as any endpoint change. The panel's Enable
+and Disable still work meanwhile.
+
 Users are shown the destination **hostname** before their credential goes
 anywhere, so an endpoint that doesn't visibly match the backend they expect
-will (rightly) make them stop. When the disclosure page shows for an
+will (rightly) make them stop. From platform v0.18.30 the connect page
+names each endpoint by its origin and path, never its query ("Your
+credentials go to https://host/path and https://host/other."), so tell the
+user what their members will see there. When the disclosure page shows for an
 `oauth2_code` connection is the `connections.consent` setting's to say
 (`get_config` with `app` prints its description). A credential host that no
 connection on the platform was using before notifies the platform admins:
 routine oversight, not a fault, so a legitimate new backend simply shows up
-in their feed once.
+in their feed once (from platform v0.18.30 the notice names the origin and
+path of each endpoint at that host).
 
 Call the `set_app_connection` MCP tool:
 
@@ -329,7 +341,12 @@ you were handed rather than treating the gate as proof it is external. If the
 call is refused `invalid_connection_definition`, its message names the rule
 (a non-public endpoint, a missing field, a bad strategy and config pairing,
 a client pair on a strategy that takes none), and `invalid_connection_name`
-names the connection name's grammar: fix that one thing and retry. A call
+names the connection name's grammar: fix that one thing and retry. From
+platform v0.18.30 write each endpoint exactly as the platform reads it: a
+lower-case host, a path (at least `/`), no default port, and no space, tab
+or newline. Anything else is refused `invalid_connection_definition` with
+"endpoint rejected: write it as <href>, the address the platform sends to",
+naming the form to write. A call
 that fails changed nothing (only the audit rows it may write before the
 write itself, `connection_sink_split` and `connection_credentials_invalidated`,
 can remain), so a retry repeats the whole of it. An
@@ -337,7 +354,7 @@ can remain), so a retry repeats the whole of it. An
 this connection or its pause, is in flight: retry once after a moment,
 never in a loop.
 
-Six answers are **not** bad arguments, so don't retry blindly:
+Seven answers are **not** bad arguments, so don't retry blindly:
 
 - **`app_anonymous`**: the app is anonymous, and an anonymous app has no
   Connections (step 1). Stop, and say so plainly.
@@ -370,6 +387,18 @@ Six answers are **not** bad arguments, so don't retry blindly:
   hosting and SaaS domains the platform compares the full hostname, so two
   instances of one vendor (`dev1.service-now.com` and `dev2.service-now.com`)
   count as different sites and raise the warning.
+- **A `WARNING:` that the stored client secret was cleared** (`oauth2_code`,
+  from platform v0.18.30). An omitted `client_secret` keeps the stored
+  secret only while the endpoints stay where they are: a change of any of
+  its endpoints (`authorize_endpoint`, `token_endpoint`,
+  `revocation_endpoint`) without `client_secret` clears it. The call
+  **succeeded**, its answer reads `Client secret: not set`, and until the
+  secret is sent again the backend refuses the connection's token requests.
+  So whenever an endpoint moves, send `client_secret` in the same call; if
+  this warning came, ask the user for the secret and call again with it. A
+  change of the strategy to `oauth2_client_creds` or `secret_form` drops the
+  secret with no warning, as it always has, since those strategies take
+  none.
 - **A `NOTE:` that stored credentials were invalidated although no endpoint
   changed** ("the connection was changed by another call while this one
   ran, or credentials were left under its name"). The call **succeeded**.
@@ -390,7 +419,10 @@ it's been sent.
 `label`, `strategy`, `config` and `scopes` with every call, not just the
 field you're changing: omitting `scopes`, for instance, silently clears it.
 The tool's description names the fields that are safe to omit. Run
-`list_connections` before any re-call, per the approval gate above.
+`list_connections` before any re-call, per the approval gate above. From
+platform v0.18.30 a transfer of the app (`transfer_app`) clears the client
+secret of every connection that holds one, and its new owner sets each
+again with `set_app_connection` (`client_secret`).
 
 **`remove_app_connection` is the destructive one, and it is not the pause
 switch.** It deletes the definition **and every credential the app's users
@@ -474,9 +506,14 @@ async def list_incidents(ctx: Context) -> dict:
             return {"error": "Your CRM connection is paused right now. "
                              "Try again later; you don't need to reconnect."}
         raise
-    # cred is {"access_token": ..., "header": ..., "expires_at": ...}
-    token = cred["access_token"]
-    # ... make the backend call with `token`; keep it in memory only ...
+    # cred is {"access_token": ...} or {"header": {"name": ..., "value": ...}},
+    # plus "expires_at", which can be missing or null (see the rules below).
+    # Which field arrives depends on the connection's delivery, not strategy.
+    if cred.get("header"):
+        auth = {cred["header"]["name"]: cred["header"]["value"]}
+    else:
+        auth = {"Authorization": f"Bearer {cred['access_token']}"}
+    # ... make the backend call with `auth` headers; keep it in memory only ...
 ```
 
 In a JS container, `connections.get(name, callerAssertion)` takes the
@@ -484,8 +521,9 @@ assertion you read off `request.headers` in your `POST /mcp` handler, and the
 same branches read:
 
 ```js
+let cred;
 try {
-  const cred = await connections.get("crm", callerAssertion);
+  cred = await connections.get("crm", callerAssertion);
 } catch (e) {
   if (e instanceof ConnectionLocked) {
     return "Re-authorize this connector (/mcp → re-authenticate) and try again.";
@@ -498,6 +536,11 @@ try {
   }
   throw e;
 }
+// cred has `access_token` or `header` ({ name, value }), plus `expires_at`,
+// which can be missing or null (see the rules below).
+const auth = cred.header
+  ? { [cred.header.name]: cred.header.value }
+  : { Authorization: `Bearer ${cred.access_token}` };
 ```
 
 Rules that hold regardless of language:
@@ -508,8 +551,9 @@ Rules that hold regardless of language:
 - **Never persist or log the assertion itself.** Echo it onto the seam call
   and drop it (§2.2's **What the app MUST NOT do** says why).
 - On success you get back a live credential for *that* user (an
-  `access_token`, or a ready-made `header`, depending on strategy) plus an
-  `expires_at`. Use it for the backend call you're about to make, and never
+  `access_token`, or a ready-made `header` to send as given: which one
+  depends on the connection's delivery, so branch on `header` first) plus an
+  `expires_at`, which can be missing or null (always for a pasted `secret_form` token, and for a backend token with no stated lifetime and nothing to renew it): treat that as unknown, not as never expiring. Use it for the backend call you're about to make, and never
   write it to disk, a database row, or a log line. Keeping it in memory
   between calls is `get_app_security` §8's rule, which says how a cache must
   be keyed: one MCP container serves every user of the app from one
@@ -557,15 +601,37 @@ Rules that hold regardless of language:
   - **`502 connections_upstream_error`**: the backend's own token endpoint
     failed while the platform was renewing the credential. The backend's
     outage, not the user's connection: retry later.
+  - **`502 connections_upstream_refused`**: the backend refused the
+    platform's renewal of the credential in a way no retry fixes: it refused
+    this app's registered client or its request (an expired or rotated client
+    secret, a disabled client, a withdrawn scope), not the user's own
+    credential, which the platform keeps. Tell the user the backend refused
+    the app's connection settings and that the app's owner has been told (the
+    platform sends the owner a `connection_refused` notice, once a day per
+    connection); do not retry, and do not send them to `connect_url`. The
+    owner's fix is the connection's settings, as the `connection_refused`
+    notice names them: the client an `oauth2_code` connection is registered
+    with, or a client-credentials connection's token endpoint and scopes, set
+    again with `set_app_connection`.
   - **`429 rate_limited`** (with `Retry-After: 60`): the seam's abuse brake.
     Wait the `Retry-After` interval, then retry. If a tool trips this in
     normal use, it is calling the seam for every backend request: reuse the
     credential as `get_app_security` §8 allows instead.
   - **`401 connections_bad_assertion`** and **`403
-    connections_not_declared`** are the **app's** to fix: echo the
+    connections_not_declared`** are usually the **app's** to fix: echo the
     `X-Caller-Assertion` of the request you are serving now, not one kept
     from an earlier request, and check the connection name you passed
-    against `list_connections`.
+    against `list_connections`. A `401 connections_bad_assertion` can also
+    be the host's: one the platform last uploaded before it began naming the
+    app, which `restart_app`, or the next release's host wave, fixes
+    (contract §2.2). It is also the answer
+    to an assertion relayed through another app's host: an assertion is good
+    only on the app it was issued to, so never hand one on to another app.
+  - **`401 unauthorized`**: the host holds a stale seam key, as after a
+    key rotation. Nothing in the app's code fixes it: the owner runs
+    `restart_app`, or waits for the host wave.
+  - **`400 bad_request`**: the assertion was not echoed. Send the
+    `X-Caller-Assertion` header on the seam call.
 - Add a small `whoami` or status tool so the user (and you, while testing)
   can confirm the Connection is live and see which backend identity it
   resolves to, without needing to exercise a real feature first.
@@ -615,17 +681,10 @@ When the user reports an error page after opening a connect link, read
 can show has one meaning and one next step, and its most common one ("Not
 available") deliberately hides which of several causes it is.
 
-## References
+## 7. Hand off
 
-- `references/discovery.md`: the probe recipe for step 2 when the user isn't
-  sure how the backend signs people in (which `/.well-known/*` documents to
-  fetch, how to read a `WWW-Authenticate` header, and how each finding maps
-  to a config field), and the field mapping for an `oauth2_code` config in
-  step 3.
-- `references/oauth-client-request.md`: the copy-paste request for step 3
-  when a backend admin needs to register the OAuth client.
-- `references/connect-page.md`: what each connect-page error means and what
-  to check, for step 6 when a user reports one.
-- `references/older-template-client.md`: what an older template client lacks
-  and how to replace it, for step 5 when the repo's client has no
-  `ConnectionLocked` or no `ConnectionsError`.
+Once a user's connect works, the Connection is done. Each later change to
+the app's code goes through `inno-safety-preflight`, then `inno-ship`. A
+person whose connection is stuck is `inno-manage-app`'s support lever
+(`disconnect_user_connection`), and a change to the connection's own
+settings comes back to this skill (`set_app_connection`).
